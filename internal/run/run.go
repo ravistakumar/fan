@@ -28,6 +28,9 @@ type Runner struct {
 	NewAgent func(string) (agent.Agent, error)
 	// Now returns the timestamp slug used in the integration branch name.
 	Now func() string
+	// FinalGate, when non-empty, is run once on the integration branch after all
+	// merges to catch interaction bugs between independently-passing tasks.
+	FinalGate string
 }
 
 // candidate is the intermediate result of the parallel phase: either a
@@ -39,23 +42,49 @@ type candidate struct {
 	terminal *result.Outcome // non-nil if the task is already done (error/gate-fail/no-op)
 }
 
-// Run executes tasks and returns their outcomes plus the integration branch
-// name. finalGate, when true, runs the first task's-style gate once more on the
-// integration branch after all merges; its result is reported by the caller via
-// the returned outcomes' overall state (see summary).
-func (r Runner) Run(ctx context.Context, tasks []task.Task, concurrency int, finalGate bool) ([]result.Outcome, string, error) {
+// Run executes tasks against a fresh integration branch and returns the
+// outcomes and branch name. It does not run a final gate; use RunWithFinalGate
+// for that.
+func (r Runner) Run(ctx context.Context, tasks []task.Task, concurrency int, _ bool) ([]result.Outcome, string, error) {
 	base, err := r.Repo.Head()
 	if err != nil {
 		return nil, "", err
 	}
 	branch := "fan/" + r.now()
-
 	intDir := filepath.Join(r.WorkRoot, "integration")
 	if err := r.Repo.CreateWorktreeBranch(intDir, branch, base); err != nil {
 		return nil, "", fmt.Errorf("create integration worktree: %w", err)
 	}
 	defer r.Repo.RemoveWorktree(intDir)
+	return r.execute(ctx, tasks, concurrency, base, intDir), branch, nil
+}
 
+// RunWithFinalGate runs the pipeline, then runs FinalGate on the integration
+// branch (if set) before tearing the integration worktree down.
+func (r Runner) RunWithFinalGate(ctx context.Context, tasks []task.Task, concurrency int) ([]result.Outcome, string, gate.Result, error) {
+	base, err := r.Repo.Head()
+	if err != nil {
+		return nil, "", gate.Result{}, err
+	}
+	branch := "fan/" + r.now()
+	intDir := filepath.Join(r.WorkRoot, "integration")
+	if err := r.Repo.CreateWorktreeBranch(intDir, branch, base); err != nil {
+		return nil, "", gate.Result{}, fmt.Errorf("create integration worktree: %w", err)
+	}
+	defer r.Repo.RemoveWorktree(intDir)
+
+	outcomes := r.execute(ctx, tasks, concurrency, base, intDir)
+
+	fg := gate.Result{Passed: true}
+	if r.FinalGate != "" {
+		fg = gate.Run(ctx, r.FinalGate, intDir)
+	}
+	return outcomes, branch, fg, nil
+}
+
+// execute runs the parallel phase (worktree + agent + gate per task) and the
+// serial phase (cherry-pick onto intDir), returning the outcome for each task.
+func (r Runner) execute(ctx context.Context, tasks []task.Task, concurrency int, base, intDir string) []result.Outcome {
 	// Parallel phase: worktree + agent + gate for each task.
 	cands := schedule.Run(ctx, tasks, concurrency, func(ctx context.Context, _ int, tk task.Task) candidate {
 		r.Reporter.Start(tk)
@@ -75,11 +104,12 @@ func (r Runner) Run(ctx context.Context, tasks []task.Task, concurrency int, fin
 			continue
 		}
 		clean, err := r.Repo.CherryPick(intDir, c.sha)
-		if err != nil {
+		switch {
+		case err != nil:
 			outcomes[i] = result.Outcome{Task: c.task, Status: result.Errored, Detail: err.Error()}
-		} else if clean {
+		case clean:
 			outcomes[i] = result.Outcome{Task: c.task, Status: result.Merged}
-		} else {
+		default:
 			kept := "fan/" + c.task.ID
 			_ = r.Repo.CreateBranch(kept, c.sha)
 			outcomes[i] = result.Outcome{Task: c.task, Status: result.QueuedConflict, Branch: kept}
@@ -87,8 +117,7 @@ func (r Runner) Run(ctx context.Context, tasks []task.Task, concurrency int, fin
 		r.Reporter.Finish(outcomes[i])
 		r.removeWorktree(c.wtDir)
 	}
-
-	return outcomes, branch, nil
+	return outcomes
 }
 
 // runTask creates a worktree, runs the agent, commits, and runs the gate. It

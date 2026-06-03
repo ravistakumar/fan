@@ -171,3 +171,24 @@ func TestRunQueuesConflicts(t *testing.T) {
 		t.Error("conflicted task y should keep a branch")
 	}
 }
+
+func TestRunFinalGateResult(t *testing.T) {
+	repo, _ := vcs.Open(initRepo(t))
+	tasks := []task.Task{{ID: "a", Prompt: "p", Agent: "fake", Gate: "true"}}
+	r := Runner{
+		Repo: repo, WorkRoot: t.TempDir(),
+		Reporter:  NewTextReporter(os.Stderr),
+		Now:       func() string { return "ts" },
+		FinalGate: "test -f a.txt", // passes only if the merge landed a.txt
+		AgentFor: func(tk task.Task) (agent.Agent, error) {
+			return fakeAgent{name: "fake", file: "a.txt", body: "a\n"}, nil
+		},
+	}
+	_, _, fg, err := r.RunWithFinalGate(context.Background(), tasks, 1)
+	if err != nil {
+		t.Fatalf("RunWithFinalGate: %v", err)
+	}
+	if !fg.Passed {
+		t.Errorf("final gate should pass; output=%q", fg.Output)
+	}
+}
