@@ -98,3 +98,65 @@ func Parse(data []byte, validAgent func(string) bool) (File, error) {
 	}
 	return out, nil
 }
+
+// Expand turns a list of items and a template into tasks. The template must
+// contain the placeholder "{}", which is replaced by each item. IDs are derived
+// from each item's base name (lowercased, non-alphanumerics collapsed to "-")
+// and de-duplicated by appending an index.
+func Expand(items []string, template, agent, gate string) ([]Task, error) {
+	if len(items) == 0 {
+		return nil, fmt.Errorf("no items to fan out")
+	}
+	if !strings.Contains(template, "{}") {
+		return nil, fmt.Errorf("template must contain the {} placeholder")
+	}
+	if agent == "" {
+		return nil, fmt.Errorf("no agent specified")
+	}
+
+	seen := map[string]int{}
+	out := make([]Task, 0, len(items))
+	for _, item := range items {
+		base := deriveID(item)
+		if base == "" {
+			base = "task"
+		}
+		id := base
+		if n := seen[base]; n > 0 {
+			id = fmt.Sprintf("%s-%d", base, n+1)
+		}
+		seen[base]++
+		out = append(out, Task{
+			ID:     id,
+			Prompt: strings.ReplaceAll(template, "{}", item),
+			Agent:  agent,
+			Gate:   gate,
+		})
+	}
+	return out, nil
+}
+
+// deriveID reduces a path to a short slug: base name without extension,
+// lowercased, with runs of non-alphanumerics turned into single hyphens.
+func deriveID(item string) string {
+	s := item
+	if i := strings.LastIndexAny(s, "/\\"); i >= 0 {
+		s = s[i+1:]
+	}
+	if i := strings.LastIndex(s, "."); i > 0 {
+		s = s[:i]
+	}
+	s = strings.ToLower(s)
+	var b strings.Builder
+	prevDash := false
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
