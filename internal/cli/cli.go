@@ -2,6 +2,8 @@
 package cli
 
 import (
+	"time"
+
 	"github.com/spf13/cobra"
 )
 
@@ -17,5 +19,11 @@ func Execute() error {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	root.AddCommand(newRunCmd())
 	return root.Execute()
+}
+
+// timestamp is the slug used for integration branch names.
+func timestamp() string {
+	return time.Now().Format("2006-01-02-1504")
 }
