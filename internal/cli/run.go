@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ravistakumar/fan/internal/agent"
+	"github.com/ravistakumar/fan/internal/gate"
+	"github.com/ravistakumar/fan/internal/result"
 	"github.com/ravistakumar/fan/internal/run"
 	"github.com/ravistakumar/fan/internal/summary"
 	"github.com/ravistakumar/fan/internal/task"
@@ -210,5 +212,28 @@ func runTasks(cmd *cobra.Command, tasks []task.Task, conc int, finalGate string)
 		return err
 	}
 	fmt.Fprint(cmd.OutOrStdout(), summary.Render(outcomes, branch, fg))
+	return runStatusErr(outcomes, fg)
+}
+
+// runStatusErr returns a non-nil error when a run should be treated as failed:
+// the final integration gate failed, or every task ended in an error. Queued
+// conflicts and gate-failures are expected partial outcomes, not tool failures,
+// so they do not trigger a non-zero exit.
+func runStatusErr(outcomes []result.Outcome, fg gate.Result) error {
+	if !fg.Passed {
+		return fmt.Errorf("integration gate failed")
+	}
+	if len(outcomes) > 0 {
+		allErrored := true
+		for _, o := range outcomes {
+			if o.Status != result.Errored {
+				allErrored = false
+				break
+			}
+		}
+		if allErrored {
+			return fmt.Errorf("all %d tasks failed", len(outcomes))
+		}
+	}
 	return nil
 }
