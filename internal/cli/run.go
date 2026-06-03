@@ -39,32 +39,11 @@ func newRunCmd() *cobra.Command {
 				return fmt.Errorf("no tasks to run")
 			}
 
-			repo, err := vcs.Open(".")
-			if err != nil {
-				return err
-			}
-			workRoot := filepath.Join(repo.Root(), ".fan")
-			if err := os.MkdirAll(workRoot, 0o755); err != nil {
-				return err
-			}
-
 			finalGate := ""
 			if !noFinalGate {
 				finalGate = firstGate(tasks)
 			}
-			r := run.Runner{
-				Repo:      repo,
-				WorkRoot:  workRoot,
-				Reporter:  run.NewTextReporter(cmd.ErrOrStderr()),
-				FinalGate: finalGate,
-				Now:       timestamp,
-			}
-			outcomes, branch, fg, err := r.RunWithFinalGate(context.Background(), tasks, conc)
-			if err != nil {
-				return err
-			}
-			fmt.Fprint(cmd.OutOrStdout(), summary.Render(outcomes, branch, fg))
-			return nil
+			return runTasks(cmd, tasks, conc, finalGate)
 		},
 	}
 	cmd.Flags().StringVar(&each, "each", "", "fan a template over a glob or comma list (use {} placeholder)")
@@ -205,4 +184,31 @@ func concOrDefault(c int) int {
 		return c
 	}
 	return task.DefaultConcurrency()
+}
+
+// runTasks opens the repo, runs the tasks, and prints the summary. Shared by
+// `fan run` and `fan plan --yes`. finalGate is the command to run on the
+// integration branch after merges ("" to skip it).
+func runTasks(cmd *cobra.Command, tasks []task.Task, conc int, finalGate string) error {
+	repo, err := vcs.Open(".")
+	if err != nil {
+		return err
+	}
+	workRoot := filepath.Join(repo.Root(), ".fan")
+	if err := os.MkdirAll(workRoot, 0o755); err != nil {
+		return err
+	}
+	r := run.Runner{
+		Repo:      repo,
+		WorkRoot:  workRoot,
+		Reporter:  run.NewTextReporter(cmd.ErrOrStderr()),
+		FinalGate: finalGate,
+		Now:       timestamp,
+	}
+	outcomes, branch, fg, err := r.RunWithFinalGate(context.Background(), tasks, conc)
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(cmd.OutOrStdout(), summary.Render(outcomes, branch, fg))
+	return nil
 }

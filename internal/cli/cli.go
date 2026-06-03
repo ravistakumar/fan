@@ -20,6 +20,7 @@ func Execute() error {
 		SilenceErrors: true,
 	}
 	root.AddCommand(newRunCmd())
+	root.AddCommand(newPlanCmd())
 	return root.Execute()
 }
 
