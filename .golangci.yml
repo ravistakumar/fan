@@ -1,0 +1,10 @@
+version: "2"
+
+# Lint config for fan. We keep golangci-lint's default linter set and only
+# exclude the conventional, safe-to-ignore standard-library error returns
+# (e.g. fmt.Fprint* to stdout/stderr/strings.Builder, which effectively never
+# fail and where there is nothing useful to do with the error).
+linters:
+  exclusions:
+    presets:
+      - std-error-handling
