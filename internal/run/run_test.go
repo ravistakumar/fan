@@ -45,7 +45,7 @@ func initRepo(t *testing.T) string {
 		}
 	}
 	run("init", "-q", "-b", "main")
-	os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("seed\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("seed\n"), 0o644)
 	run("add", "-A")
 	run("commit", "-q", "-m", "seed")
 	return dir

@@ -57,7 +57,7 @@ func TestWorktreeCommitAndCleanCherryPick(t *testing.T) {
 	if err := r.AddWorktree(wtDir, base); err != nil {
 		t.Fatalf("AddWorktree: %v", err)
 	}
-	os.WriteFile(filepath.Join(wtDir, "a.txt"), []byte("a\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(wtDir, "a.txt"), []byte("a\n"), 0o644)
 	sha, changed, err := r.CommitAll(wtDir, "fan(a): add a")
 	if err != nil || !changed {
 		t.Fatalf("CommitAll: sha=%q changed=%v err=%v", sha, changed, err)
@@ -79,7 +79,7 @@ func TestCommitAllNoChanges(t *testing.T) {
 	r, _ := Open(initRepo(t))
 	base, _ := r.Head()
 	wtDir := filepath.Join(t.TempDir(), "wt")
-	r.AddWorktree(wtDir, base)
+	_ = r.AddWorktree(wtDir, base)
 	_, changed, err := r.CommitAll(wtDir, "noop")
 	if err != nil {
 		t.Fatalf("CommitAll: %v", err)
@@ -93,12 +93,12 @@ func TestConflictingCherryPickReportsUnclean(t *testing.T) {
 	r, _ := Open(initRepo(t))
 	base, _ := r.Head()
 	intDir := filepath.Join(t.TempDir(), "integration")
-	r.CreateWorktreeBranch(intDir, "fan/test", base)
+	_ = r.CreateWorktreeBranch(intDir, "fan/test", base)
 
 	// First task edits seed.txt and is merged.
 	wt1 := filepath.Join(t.TempDir(), "wt1")
-	r.AddWorktree(wt1, base)
-	os.WriteFile(filepath.Join(wt1, "seed.txt"), []byte("one\n"), 0o644)
+	_ = r.AddWorktree(wt1, base)
+	_ = os.WriteFile(filepath.Join(wt1, "seed.txt"), []byte("one\n"), 0o644)
 	sha1, _, _ := r.CommitAll(wt1, "edit one")
 	if clean, _ := r.CherryPick(intDir, sha1); !clean {
 		t.Fatal("first pick should be clean")
@@ -106,8 +106,8 @@ func TestConflictingCherryPickReportsUnclean(t *testing.T) {
 
 	// Second task edits the same line from the same base → conflict.
 	wt2 := filepath.Join(t.TempDir(), "wt2")
-	r.AddWorktree(wt2, base)
-	os.WriteFile(filepath.Join(wt2, "seed.txt"), []byte("two\n"), 0o644)
+	_ = r.AddWorktree(wt2, base)
+	_ = os.WriteFile(filepath.Join(wt2, "seed.txt"), []byte("two\n"), 0o644)
 	sha2, _, _ := r.CommitAll(wt2, "edit two")
 	clean, err := r.CherryPick(intDir, sha2)
 	if err != nil {
@@ -117,17 +117,16 @@ func TestConflictingCherryPickReportsUnclean(t *testing.T) {
 		t.Error("expected conflict (unclean)")
 	}
 	// Repo must be left clean (cherry-pick aborted), so the next pick can run.
-	if clean3, _ := r.CherryPick(intDir, sha1); clean3 {
-		// sha1 already applied → empty pick; we only assert no error/hang.
-	}
+	// sha1 already applied → empty pick; we only assert no error/hang.
+	_, _ = r.CherryPick(intDir, sha1)
 }
 
 func TestCreateBranchAtSha(t *testing.T) {
 	r, _ := Open(initRepo(t))
 	base, _ := r.Head()
 	wt := filepath.Join(t.TempDir(), "wt")
-	r.AddWorktree(wt, base)
-	os.WriteFile(filepath.Join(wt, "b.txt"), []byte("b\n"), 0o644)
+	_ = r.AddWorktree(wt, base)
+	_ = os.WriteFile(filepath.Join(wt, "b.txt"), []byte("b\n"), 0o644)
 	sha, _, _ := r.CommitAll(wt, "add b")
 	if err := r.CreateBranch("fan/keep-me", sha); err != nil {
 		t.Fatalf("CreateBranch: %v", err)

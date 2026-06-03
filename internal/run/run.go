@@ -55,7 +55,7 @@ func (r Runner) Run(ctx context.Context, tasks []task.Task, concurrency int, _ b
 	if err := r.Repo.CreateWorktreeBranch(intDir, branch, base); err != nil {
 		return nil, "", fmt.Errorf("create integration worktree: %w", err)
 	}
-	defer r.Repo.RemoveWorktree(intDir)
+	defer func() { _ = r.Repo.RemoveWorktree(intDir) }()
 	return r.execute(ctx, tasks, concurrency, base, intDir), branch, nil
 }
 
@@ -71,7 +71,7 @@ func (r Runner) RunWithFinalGate(ctx context.Context, tasks []task.Task, concurr
 	if err := r.Repo.CreateWorktreeBranch(intDir, branch, base); err != nil {
 		return nil, "", gate.Result{}, fmt.Errorf("create integration worktree: %w", err)
 	}
-	defer r.Repo.RemoveWorktree(intDir)
+	defer func() { _ = r.Repo.RemoveWorktree(intDir) }()
 
 	outcomes := r.execute(ctx, tasks, concurrency, base, intDir)
 
@@ -175,7 +175,7 @@ func (r Runner) now() string {
 
 func (r Runner) removeWorktree(dir string) {
 	if dir != "" {
-		r.Repo.RemoveWorktree(dir)
+		_ = r.Repo.RemoveWorktree(dir)
 	}
 }
 
