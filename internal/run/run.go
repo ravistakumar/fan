@@ -71,7 +71,7 @@ func (r Runner) Run(ctx context.Context, tasks []task.Task, concurrency int, fin
 	for i, c := range cands {
 		if c.terminal != nil {
 			outcomes[i] = *c.terminal
-			r.Repo.RemoveWorktree(c.wtDir)
+			r.removeWorktree(c.wtDir)
 			continue
 		}
 		clean, err := r.Repo.CherryPick(intDir, c.sha)
@@ -85,7 +85,7 @@ func (r Runner) Run(ctx context.Context, tasks []task.Task, concurrency int, fin
 			outcomes[i] = result.Outcome{Task: c.task, Status: result.QueuedConflict, Branch: kept}
 		}
 		r.Reporter.Finish(outcomes[i])
-		r.Repo.RemoveWorktree(c.wtDir)
+		r.removeWorktree(c.wtDir)
 	}
 
 	return outcomes, branch, nil
@@ -142,6 +142,12 @@ func (r Runner) now() string {
 		return r.Now()
 	}
 	return "run"
+}
+
+func (r Runner) removeWorktree(dir string) {
+	if dir != "" {
+		r.Repo.RemoveWorktree(dir)
+	}
 }
 
 func terminal(tk task.Task, s result.Status, branch, detail string) candidate {

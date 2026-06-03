@@ -125,3 +125,49 @@ func TestRunRecordsAgentErrors(t *testing.T) {
 		t.Errorf("status = %q, want error", outcomes[0].Status)
 	}
 }
+
+// TestRunQueuesConflicts exercises the core safety behavior: when two tasks both
+// edit the same line of the same file, the first cherry-picks cleanly (merged)
+// and the second conflicts, producing a QueuedConflict outcome with a non-empty
+// branch so the user can resolve it manually.
+func TestRunQueuesConflicts(t *testing.T) {
+	repo, _ := vcs.Open(initRepo(t))
+	// Both tasks overwrite seed.txt (already exists from initRepo) with different
+	// content on the same line, guaranteeing a conflict on the second cherry-pick.
+	tasks := []task.Task{
+		{ID: "x", Prompt: "edit seed x", Agent: "fake", Gate: "true"},
+		{ID: "y", Prompt: "edit seed y", Agent: "fake", Gate: "true"},
+	}
+	bodies := map[string]string{"x": "from-x\n", "y": "from-y\n"}
+	r := Runner{
+		Repo: repo, WorkRoot: t.TempDir(),
+		Reporter: NewTextReporter(os.Stderr),
+		Now:      func() string { return "ts" },
+		AgentFor: func(tk task.Task) (agent.Agent, error) {
+			return fakeAgent{name: "fake", file: "seed.txt", body: bodies[tk.ID]}, nil
+		},
+	}
+	// concurrency 1: task x runs first and merges; task y conflicts.
+	outcomes, _, err := r.Run(context.Background(), tasks, 1, false)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(outcomes) != 2 {
+		t.Fatalf("expected 2 outcomes, got %d", len(outcomes))
+	}
+	statuses := map[string]result.Status{}
+	branches := map[string]string{}
+	for _, o := range outcomes {
+		statuses[o.Task.ID] = o.Status
+		branches[o.Task.ID] = o.Branch
+	}
+	if statuses["x"] != result.Merged {
+		t.Errorf("task x: status = %q, want merged", statuses["x"])
+	}
+	if statuses["y"] != result.QueuedConflict {
+		t.Errorf("task y: status = %q, want queued: conflict", statuses["y"])
+	}
+	if branches["y"] == "" {
+		t.Error("conflicted task y should keep a branch")
+	}
+}
