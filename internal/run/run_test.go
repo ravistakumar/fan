@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/ravistakumar/fan/internal/agent"
@@ -221,19 +222,36 @@ func TestRunFinalGateResult(t *testing.T) {
 	}
 }
 
-// spyReporter records the lifecycle calls the runner makes.
+// spyReporter records the lifecycle calls the runner makes. Start and Finish
+// are called from worker goroutines, so it is mutex-guarded like any real
+// Reporter implementation.
 type spyReporter struct {
+	mu                             sync.Mutex
 	begins, ends, starts, finishes int
 	total, concurrency             int
 }
 
 func (s *spyReporter) Begin(total, concurrency int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.begins++
 	s.total, s.concurrency = total, concurrency
 }
-func (s *spyReporter) Start(task.Task)       { s.starts++ }
-func (s *spyReporter) Finish(result.Outcome) { s.finishes++ }
-func (s *spyReporter) End()                  { s.ends++ }
+func (s *spyReporter) Start(task.Task) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.starts++
+}
+func (s *spyReporter) Finish(result.Outcome) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishes++
+}
+func (s *spyReporter) End() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ends++
+}
 
 func TestExecuteBracketsRunWithBeginEnd(t *testing.T) {
 	repo, _ := vcs.Open(initRepo(t))

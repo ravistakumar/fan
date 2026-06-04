@@ -111,16 +111,16 @@ func (m model) View() string {
 		if st == nil {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("    %s %-18s %-8s %s\n",
-			spin, trunc(st.id, 18), st.agent, fmtDur(m.now.Sub(st.started))))
+		fmt.Fprintf(&b, "    %s %-18s %-8s %s\n",
+			spin, trunc(st.id, 18), st.agent, fmtDur(m.now.Sub(st.started)))
 	}
 
 	if rec := m.recentToShow(); len(rec) > 0 {
 		b.WriteString("  recently done\n")
 		for _, st := range rec {
-			b.WriteString(fmt.Sprintf("    %s %-18s %s\n",
+			fmt.Fprintf(&b, "    %s %-18s %s\n",
 				glyph(st.status), trunc(st.id, 18),
-				statusStyle(st.status).Render(string(st.status))))
+				statusStyle(st.status).Render(string(st.status)))
 		}
 	}
 
