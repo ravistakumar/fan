@@ -14,12 +14,14 @@ import (
 )
 
 // fakeAgent writes a file named after the task id, simulating an edit. If fail
-// is true it returns an error without writing.
+// is true it returns an error without writing; if noop is true it succeeds
+// without changing anything.
 type fakeAgent struct {
 	name string
 	file string // file to create, relative to dir
 	body string
 	fail bool
+	noop bool
 }
 
 func (f fakeAgent) Name() string      { return f.name }
@@ -27,6 +29,9 @@ func (f fakeAgent) Available() bool   { return true }
 func (f fakeAgent) Run(_ context.Context, _ string, dir string) (string, error) {
 	if f.fail {
 		return "", os.ErrPermission
+	}
+	if f.noop {
+		return "", nil
 	}
 	return "", os.WriteFile(filepath.Join(dir, f.file), []byte(f.body), 0o644)
 }
@@ -123,6 +128,29 @@ func TestRunRecordsAgentErrors(t *testing.T) {
 	outcomes, _, _ := r.Run(context.Background(), tasks, 1, false)
 	if outcomes[0].Status != result.Errored {
 		t.Errorf("status = %q, want error", outcomes[0].Status)
+	}
+}
+
+// TestRunReportsNoOpWhenAgentMakesNoChange covers the path where the agent runs
+// successfully but leaves the worktree unchanged: the commit is empty, so the
+// task is a no-op rather than a merge.
+func TestRunReportsNoOpWhenAgentMakesNoChange(t *testing.T) {
+	repo, _ := vcs.Open(initRepo(t))
+	tasks := []task.Task{{ID: "a", Prompt: "p", Agent: "fake", Gate: "true"}}
+	r := Runner{
+		Repo: repo, WorkRoot: t.TempDir(),
+		Reporter: NewTextReporter(os.Stderr),
+		Now:      func() string { return "ts" },
+		AgentFor: func(tk task.Task) (agent.Agent, error) {
+			return fakeAgent{name: "fake", noop: true}, nil
+		},
+	}
+	outcomes, _, _ := r.Run(context.Background(), tasks, 1, false)
+	if outcomes[0].Status != result.NoOp {
+		t.Errorf("status = %q, want no-op", outcomes[0].Status)
+	}
+	if outcomes[0].Branch != "" {
+		t.Errorf("no-op task should not keep a branch, got %q", outcomes[0].Branch)
 	}
 }
 
