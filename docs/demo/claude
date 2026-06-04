@@ -1,0 +1,16 @@
+#!/bin/sh
+# Fake "claude" CLI used ONLY to record the fan demo GIF deterministically.
+# fan invokes it headless as `claude -p "<prompt>"` inside each task's worktree.
+# This stub makes a small, real edit to the file named in the prompt so the
+# commit + cherry-pick are genuine — it never touches the network.
+if [ "$1" = "-p" ]; then
+	prompt="$2"
+	# Pull the target path out of a prompt like "Migrate src/Button.tsx to ...".
+	path=$(printf '%s\n' "$prompt" | grep -oE '[A-Za-z0-9_./-]+\.tsx' | head -1)
+	[ -n "$path" ] || path="CHANGES.txt"
+	mkdir -p "$(dirname "$path")"
+	# Stagger completions a little so the parallel fan-out is visible in the GIF.
+	sleep "0.$(( (${#path} % 6) + 3 ))"
+	printf '\n// migrated to the new Button API\n' >>"$path"
+	printf 'updated %s\n' "$path"
+fi
