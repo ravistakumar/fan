@@ -15,6 +15,8 @@ before handoff. Where `prr` sharpens one prompt, `fan` runs many in parallel.
 [![Go Report Card](https://goreportcard.com/badge/github.com/ravistakumar/fan)](https://goreportcard.com/report/github.com/ravistakumar/fan)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+![fan fanning four migrations across agents in parallel, each isolated in a worktree and auto-merged](docs/demo.gif)
+
 ## Install
 
 ```bash
