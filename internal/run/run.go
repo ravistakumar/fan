@@ -33,13 +33,23 @@ type Runner struct {
 	FinalGate string
 }
 
-// candidate is the intermediate result of the parallel phase: either a
-// gate-passing commit ready to cherry-pick, or an already-terminal outcome.
+// candidate is the intermediate result of the parallel phase. It carries the
+// facts gathered while running a task; the terminal Status is derived from them
+// by result.Decide. CherryClean is filled in during the serial phase.
 type candidate struct {
-	task     task.Task
-	sha      string
-	wtDir    string
-	terminal *result.Outcome // non-nil if the task is already done (error/gate-fail/no-op)
+	task    task.Task
+	sha     string // commit sha when the agent produced changes (empty otherwise)
+	wtDir   string // worktree to clean up ("" when none was created)
+	dec     result.Decision
+	detail  string          // error message or gate output for the eventual Outcome
+	outcome *result.Outcome // set in the parallel phase for tasks decided without a cherry-pick
+}
+
+// pendingMerge reports whether the task ran cleanly and passed its gate, so its
+// final status depends on the serial cherry-pick. Everything else is already
+// decidable from the facts gathered in runTask.
+func (c candidate) pendingMerge() bool {
+	return !c.dec.AgentErr && c.dec.Changed && c.dec.GatePassed
 }
 
 // Run executes tasks against a fresh integration branch and returns the
@@ -85,75 +95,90 @@ func (r Runner) RunWithFinalGate(ctx context.Context, tasks []task.Task, concurr
 // execute runs the parallel phase (worktree + agent + gate per task) and the
 // serial phase (cherry-pick onto intDir), returning the outcome for each task.
 func (r Runner) execute(ctx context.Context, tasks []task.Task, concurrency int, base, intDir string) []result.Outcome {
-	// Parallel phase: worktree + agent + gate for each task.
+	// Parallel phase: worktree + agent + gate for each task. Tasks that don't
+	// reach the cherry-pick (error / no-op / gate-fail) are fully decided here
+	// and reported as they finish, keeping progress live.
 	cands := schedule.Run(ctx, tasks, concurrency, func(ctx context.Context, _ int, tk task.Task) candidate {
 		r.Reporter.Start(tk)
 		c := r.runTask(ctx, tk, base)
-		if c.terminal != nil {
-			r.Reporter.Finish(*c.terminal)
+		if !c.pendingMerge() {
+			c.outcome = ptr(r.outcomeFor(c))
+			r.Reporter.Finish(*c.outcome)
 		}
 		return c
 	})
 
-	// Serial phase: cherry-pick gate-passing candidates one at a time.
+	// Serial phase: cherry-pick gate-passing candidates one at a time, then let
+	// result.Decide turn the cherry-pick result into the final status.
 	outcomes := make([]result.Outcome, len(cands))
 	for i, c := range cands {
-		if c.terminal != nil {
-			outcomes[i] = *c.terminal
+		if c.outcome != nil {
+			outcomes[i] = *c.outcome
 			r.removeWorktree(c.wtDir)
 			continue
 		}
-		clean, err := r.Repo.CherryPick(intDir, c.sha)
-		switch {
-		case err != nil:
-			outcomes[i] = result.Outcome{Task: c.task, Status: result.Errored, Detail: err.Error()}
-		case clean:
-			outcomes[i] = result.Outcome{Task: c.task, Status: result.Merged}
-		default:
-			kept := "fan/" + c.task.ID
-			_ = r.Repo.CreateBranch(kept, c.sha)
-			outcomes[i] = result.Outcome{Task: c.task, Status: result.QueuedConflict, Branch: kept}
+		if clean, err := r.Repo.CherryPick(intDir, c.sha); err != nil {
+			c.dec.AgentErr = true // a cherry-pick that errored outright is a failed run
+			c.detail = err.Error()
+		} else {
+			c.dec.CherryClean = clean
 		}
+		outcomes[i] = r.outcomeFor(c)
 		r.Reporter.Finish(outcomes[i])
 		r.removeWorktree(c.wtDir)
 	}
 	return outcomes
 }
 
+// outcomeFor derives a task's terminal Outcome from its gathered facts via
+// result.Decide, and keeps a branch for any queued (conflict / gate-fail) task
+// so its work stays reviewable.
+func (r Runner) outcomeFor(c candidate) result.Outcome {
+	status := result.Decide(c.dec)
+	branch := ""
+	if status == result.QueuedConflict || status == result.QueuedGateFail {
+		branch = "fan/" + c.task.ID
+		_ = r.Repo.CreateBranch(branch, c.sha)
+	}
+	return result.Outcome{Task: c.task, Status: status, Branch: branch, Detail: c.detail}
+}
+
 // runTask creates a worktree, runs the agent, commits, and runs the gate. It
-// returns a candidate ready for cherry-pick, or a terminal outcome.
+// returns a candidate carrying the facts (agent error, changes, gate result)
+// from which result.Decide derives the terminal status.
 func (r Runner) runTask(ctx context.Context, tk task.Task, base string) candidate {
 	wtDir := filepath.Join(r.WorkRoot, "wt", tk.ID)
 
 	ag, err := r.agentFor(tk)
 	if err != nil {
-		return terminal(tk, result.Errored, "", err.Error())
+		return candidate{task: tk, dec: result.Decision{AgentErr: true}, detail: err.Error()}
 	}
 	if err := r.Repo.AddWorktree(wtDir, base); err != nil {
-		return terminal(tk, result.Errored, "", err.Error())
+		return candidate{task: tk, dec: result.Decision{AgentErr: true}, detail: err.Error()}
 	}
 
 	if _, err := ag.Run(ctx, tk.Prompt, wtDir); err != nil {
-		return candidate{task: tk, wtDir: wtDir, terminal: ptr(result.Outcome{Task: tk, Status: result.Errored, Detail: err.Error()})}
+		return candidate{task: tk, wtDir: wtDir, dec: result.Decision{AgentErr: true}, detail: err.Error()}
 	}
 
 	sha, changed, err := r.Repo.CommitAll(wtDir, fmt.Sprintf("fan(%s): %s", tk.ID, tk.Prompt))
 	if err != nil {
-		return candidate{task: tk, wtDir: wtDir, terminal: ptr(result.Outcome{Task: tk, Status: result.Errored, Detail: err.Error()})}
+		return candidate{task: tk, wtDir: wtDir, dec: result.Decision{AgentErr: true}, detail: err.Error()}
 	}
 	if !changed {
-		return candidate{task: tk, wtDir: wtDir, terminal: ptr(result.Outcome{Task: tk, Status: result.NoOp})}
+		return candidate{task: tk, wtDir: wtDir, dec: result.Decision{Changed: false}}
 	}
 
 	g := gate.Run(ctx, tk.Gate, wtDir)
 	if !g.Passed {
-		kept := "fan/" + tk.ID
-		_ = r.Repo.CreateBranch(kept, sha)
-		return candidate{task: tk, wtDir: wtDir, terminal: ptr(result.Outcome{
-			Task: tk, Status: result.QueuedGateFail, Branch: kept, Detail: gateDetail(tk.Gate, g.Output)})}
+		return candidate{
+			task: tk, sha: sha, wtDir: wtDir,
+			dec:    result.Decision{Changed: true, GatePassed: false},
+			detail: gateDetail(tk.Gate, g.Output),
+		}
 	}
 
-	return candidate{task: tk, sha: sha, wtDir: wtDir}
+	return candidate{task: tk, sha: sha, wtDir: wtDir, dec: result.Decision{Changed: true, GatePassed: true}}
 }
 
 func (r Runner) agentFor(tk task.Task) (agent.Agent, error) {
@@ -177,10 +202,6 @@ func (r Runner) removeWorktree(dir string) {
 	if dir != "" {
 		_ = r.Repo.RemoveWorktree(dir)
 	}
-}
-
-func terminal(tk task.Task, s result.Status, branch, detail string) candidate {
-	return candidate{task: tk, terminal: ptr(result.Outcome{Task: tk, Status: s, Branch: branch, Detail: detail})}
 }
 
 func ptr(o result.Outcome) *result.Outcome { return &o }
