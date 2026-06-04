@@ -1,21 +1,23 @@
-# fan
+<div align="center">
 
-`fan` fans a list of independent coding tasks across agent CLIs in parallel,
-isolates each task in its own git worktree, runs a gate command before touching
-any shared state, and auto-merges the tasks that pass cleanly onto a throwaway
-integration branch. Your working branch is never modified.
+# fan — Parallel Coding-Agent Orchestrator
 
-`fan` is agent-agnostic: it drives your already-authenticated agent CLI — no
-API keys. It is the parallel counterpart to its sibling tool
-[`prr`](https://github.com/ravistakumar/prr), which refines a single prompt
-before handoff. Where `prr` sharpens one prompt, `fan` runs many in parallel.
+**Run many coding agents in parallel — and only merge the ones that pass.**
+`fan` fans independent tasks across your already-authenticated agent CLIs (no API
+keys), isolates each in its own git worktree, gates the result, and auto-merges the
+clean ones onto a throwaway integration branch — your working branch is never
+touched. It is the parallel counterpart to its sibling
+[`prr`](https://github.com/ravistakumar/prr): where `prr` sharpens one prompt, `fan`
+runs many.
 
 [![CI](https://github.com/ravistakumar/fan/actions/workflows/ci.yml/badge.svg)](https://github.com/ravistakumar/fan/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ravistakumar/fan)](https://github.com/ravistakumar/fan/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ravistakumar/fan)](https://goreportcard.com/report/github.com/ravistakumar/fan)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-![fan fanning four migrations across agents in parallel, each isolated in a worktree and auto-merged](docs/demo.gif)
+![fan demo](docs/demo.gif)
+
+</div>
 
 ## Install
 
