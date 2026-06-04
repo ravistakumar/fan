@@ -9,12 +9,14 @@ import (
 	"github.com/ravistakumar/fan/internal/task"
 )
 
-// Reporter receives progress events as tasks start and finish. Implementations
+// Reporter receives progress events over the lifetime of a run. Implementations
 // must be safe for concurrent use: Start/Finish are called from worker
-// goroutines.
+// goroutines. Begin and End bracket the run and are called once each.
 type Reporter interface {
+	Begin(total, concurrency int)
 	Start(t task.Task)
 	Finish(o result.Outcome)
+	End()
 }
 
 // TextReporter writes one line per event to a writer, serialized by a mutex.
@@ -39,3 +41,8 @@ func (r *TextReporter) Finish(o result.Outcome) {
 	defer r.mu.Unlock()
 	fmt.Fprintf(r.w, "• %-16s %s\n", o.Task.ID, o.Status)
 }
+
+// Begin and End are no-ops for the text reporter; its output is purely the
+// per-event lines from Start/Finish.
+func (r *TextReporter) Begin(total, concurrency int) {}
+func (r *TextReporter) End()                         {}

@@ -95,6 +95,9 @@ func (r Runner) RunWithFinalGate(ctx context.Context, tasks []task.Task, concurr
 // execute runs the parallel phase (worktree + agent + gate per task) and the
 // serial phase (cherry-pick onto intDir), returning the outcome for each task.
 func (r Runner) execute(ctx context.Context, tasks []task.Task, concurrency int, base, intDir string) []result.Outcome {
+	r.Reporter.Begin(len(tasks), concurrency)
+	defer r.Reporter.End()
+
 	// Parallel phase: worktree + agent + gate for each task. Tasks that don't
 	// reach the cherry-pick (error / no-op / gate-fail) are fully decided here
 	// and reported as they finish, keeping progress live.

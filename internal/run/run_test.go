@@ -220,3 +220,47 @@ func TestRunFinalGateResult(t *testing.T) {
 		t.Errorf("final gate should pass; output=%q", fg.Output)
 	}
 }
+
+// spyReporter records the lifecycle calls the runner makes.
+type spyReporter struct {
+	begins, ends, starts, finishes int
+	total, concurrency             int
+}
+
+func (s *spyReporter) Begin(total, concurrency int) {
+	s.begins++
+	s.total, s.concurrency = total, concurrency
+}
+func (s *spyReporter) Start(task.Task)       { s.starts++ }
+func (s *spyReporter) Finish(result.Outcome) { s.finishes++ }
+func (s *spyReporter) End()                  { s.ends++ }
+
+func TestExecuteBracketsRunWithBeginEnd(t *testing.T) {
+	repo, _ := vcs.Open(initRepo(t))
+	tasks := []task.Task{
+		{ID: "a", Prompt: "make a", Agent: "fake", Gate: "true"},
+		{ID: "b", Prompt: "make b", Agent: "fake", Gate: "true"},
+	}
+	files := map[string]string{"a": "a.txt", "b": "b.txt"}
+	spy := &spyReporter{}
+	r := Runner{
+		Repo: repo, WorkRoot: t.TempDir(),
+		Reporter: spy,
+		Now:      func() string { return "ts" },
+		AgentFor: func(tk task.Task) (agent.Agent, error) {
+			return fakeAgent{name: "fake", file: files[tk.ID], body: tk.ID + "\n"}, nil
+		},
+	}
+	if _, _, err := r.Run(context.Background(), tasks, 2, false); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if spy.begins != 1 || spy.ends != 1 {
+		t.Errorf("begins=%d ends=%d, want 1 and 1", spy.begins, spy.ends)
+	}
+	if spy.starts != 2 || spy.finishes != 2 {
+		t.Errorf("starts=%d finishes=%d, want 2 and 2", spy.starts, spy.finishes)
+	}
+	if spy.total != 2 || spy.concurrency != 2 {
+		t.Errorf("Begin got total=%d concurrency=%d, want 2 and 2", spy.total, spy.concurrency)
+	}
+}
