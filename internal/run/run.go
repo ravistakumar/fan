@@ -150,6 +150,9 @@ func (r Runner) outcomeFor(c candidate) result.Outcome {
 // returns a candidate carrying the facts (agent error, changes, gate result)
 // from which result.Decide derives the terminal status.
 func (r Runner) runTask(ctx context.Context, tk task.Task, base string) candidate {
+	if ctx.Err() != nil {
+		return candidate{task: tk, dec: result.Decision{AgentErr: true}, detail: "canceled"}
+	}
 	wtDir := filepath.Join(r.WorkRoot, "wt", tk.ID)
 
 	ag, err := r.agentFor(tk)

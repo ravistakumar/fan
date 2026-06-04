@@ -264,3 +264,25 @@ func TestExecuteBracketsRunWithBeginEnd(t *testing.T) {
 		t.Errorf("Begin got total=%d concurrency=%d, want 2 and 2", spy.total, spy.concurrency)
 	}
 }
+
+func TestRunTaskShortCircuitsOnCanceledContext(t *testing.T) {
+	repo, _ := vcs.Open(initRepo(t))
+	r := Runner{
+		Repo: repo, WorkRoot: t.TempDir(),
+		Reporter: NewTextReporter(os.Stderr),
+		Now:      func() string { return "ts" },
+		AgentFor: func(tk task.Task) (agent.Agent, error) {
+			t.Fatalf("agent should not run for a canceled task")
+			return nil, nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already canceled before the task starts
+	c := r.runTask(ctx, task.Task{ID: "x", Prompt: "p", Agent: "fake", Gate: "true"}, "HEAD")
+	if c.dec.AgentErr != true {
+		t.Errorf("canceled task should be an agent error, got %+v", c.dec)
+	}
+	if c.detail != "canceled" {
+		t.Errorf("detail = %q, want canceled", c.detail)
+	}
+}
