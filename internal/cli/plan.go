@@ -60,7 +60,7 @@ func newPlanCmd() *cobra.Command {
 				return nil
 			}
 			// Execute immediately when approved with --yes.
-			return runTasks(cmd, tasks, concOrDefault(conc), firstGate(tasks))
+			return runTasks(cmd, tasks, concOrDefault(conc), firstGate(tasks), false)
 		},
 	}
 	cmd.Flags().StringVar(&agentName, "agent", "", "agent that drafts the plan and runs tasks")

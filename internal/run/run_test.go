@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/ravistakumar/fan/internal/agent"
@@ -218,5 +219,88 @@ func TestRunFinalGateResult(t *testing.T) {
 	}
 	if !fg.Passed {
 		t.Errorf("final gate should pass; output=%q", fg.Output)
+	}
+}
+
+// spyReporter records the lifecycle calls the runner makes. Start and Finish
+// are called from worker goroutines, so it is mutex-guarded like any real
+// Reporter implementation.
+type spyReporter struct {
+	mu                             sync.Mutex
+	begins, ends, starts, finishes int
+	total, concurrency             int
+}
+
+func (s *spyReporter) Begin(total, concurrency int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.begins++
+	s.total, s.concurrency = total, concurrency
+}
+func (s *spyReporter) Start(task.Task) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.starts++
+}
+func (s *spyReporter) Finish(result.Outcome) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishes++
+}
+func (s *spyReporter) End() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ends++
+}
+
+func TestExecuteBracketsRunWithBeginEnd(t *testing.T) {
+	repo, _ := vcs.Open(initRepo(t))
+	tasks := []task.Task{
+		{ID: "a", Prompt: "make a", Agent: "fake", Gate: "true"},
+		{ID: "b", Prompt: "make b", Agent: "fake", Gate: "true"},
+	}
+	files := map[string]string{"a": "a.txt", "b": "b.txt"}
+	spy := &spyReporter{}
+	r := Runner{
+		Repo: repo, WorkRoot: t.TempDir(),
+		Reporter: spy,
+		Now:      func() string { return "ts" },
+		AgentFor: func(tk task.Task) (agent.Agent, error) {
+			return fakeAgent{name: "fake", file: files[tk.ID], body: tk.ID + "\n"}, nil
+		},
+	}
+	if _, _, err := r.Run(context.Background(), tasks, 2, false); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if spy.begins != 1 || spy.ends != 1 {
+		t.Errorf("begins=%d ends=%d, want 1 and 1", spy.begins, spy.ends)
+	}
+	if spy.starts != 2 || spy.finishes != 2 {
+		t.Errorf("starts=%d finishes=%d, want 2 and 2", spy.starts, spy.finishes)
+	}
+	if spy.total != 2 || spy.concurrency != 2 {
+		t.Errorf("Begin got total=%d concurrency=%d, want 2 and 2", spy.total, spy.concurrency)
+	}
+}
+
+func TestRunTaskShortCircuitsOnCanceledContext(t *testing.T) {
+	repo, _ := vcs.Open(initRepo(t))
+	r := Runner{
+		Repo: repo, WorkRoot: t.TempDir(),
+		Reporter: NewTextReporter(os.Stderr),
+		Now:      func() string { return "ts" },
+		AgentFor: func(tk task.Task) (agent.Agent, error) {
+			t.Fatalf("agent should not run for a canceled task")
+			return nil, nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already canceled before the task starts
+	c := r.runTask(ctx, task.Task{ID: "x", Prompt: "p", Agent: "fake", Gate: "true"}, "HEAD")
+	if c.dec.AgentErr != true {
+		t.Errorf("canceled task should be an agent error, got %+v", c.dec)
+	}
+	if c.detail != "canceled" {
+		t.Errorf("detail = %q, want canceled", c.detail)
 	}
 }

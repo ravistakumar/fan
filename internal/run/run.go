@@ -95,6 +95,9 @@ func (r Runner) RunWithFinalGate(ctx context.Context, tasks []task.Task, concurr
 // execute runs the parallel phase (worktree + agent + gate per task) and the
 // serial phase (cherry-pick onto intDir), returning the outcome for each task.
 func (r Runner) execute(ctx context.Context, tasks []task.Task, concurrency int, base, intDir string) []result.Outcome {
+	r.Reporter.Begin(len(tasks), concurrency)
+	defer r.Reporter.End()
+
 	// Parallel phase: worktree + agent + gate for each task. Tasks that don't
 	// reach the cherry-pick (error / no-op / gate-fail) are fully decided here
 	// and reported as they finish, keeping progress live.
@@ -147,6 +150,9 @@ func (r Runner) outcomeFor(c candidate) result.Outcome {
 // returns a candidate carrying the facts (agent error, changes, gate result)
 // from which result.Decide derives the terminal status.
 func (r Runner) runTask(ctx context.Context, tk task.Task, base string) candidate {
+	if ctx.Err() != nil {
+		return candidate{task: tk, dec: result.Decision{AgentErr: true}, detail: "canceled"}
+	}
 	wtDir := filepath.Join(r.WorkRoot, "wt", tk.ID)
 
 	ag, err := r.agentFor(tk)

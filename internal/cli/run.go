@@ -15,6 +15,7 @@ import (
 	"github.com/ravistakumar/fan/internal/run"
 	"github.com/ravistakumar/fan/internal/summary"
 	"github.com/ravistakumar/fan/internal/task"
+	"github.com/ravistakumar/fan/internal/tui"
 	"github.com/ravistakumar/fan/internal/vcs"
 )
 
@@ -26,6 +27,7 @@ func newRunCmd() *cobra.Command {
 		concurrency int
 		only        string
 		noFinalGate bool
+		plain       bool
 	)
 	cmd := &cobra.Command{
 		Use:   "run [taskfile]",
@@ -45,7 +47,7 @@ func newRunCmd() *cobra.Command {
 			if !noFinalGate {
 				finalGate = firstGate(tasks)
 			}
-			return runTasks(cmd, tasks, conc, finalGate)
+			return runTasks(cmd, tasks, conc, finalGate, plain)
 		},
 	}
 	cmd.Flags().StringVar(&each, "each", "", "fan a template over a glob or comma list (use {} placeholder)")
@@ -54,6 +56,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().IntVar(&concurrency, "concurrency", 0, "max concurrent agents (0 = cores-1)")
 	cmd.Flags().StringVar(&only, "only", "", "run only these task ids (comma list)")
 	cmd.Flags().BoolVar(&noFinalGate, "no-final-gate", false, "skip the gate run on the integration branch")
+	cmd.Flags().BoolVar(&plain, "plain", false, "force the plain text progress reporter (no TUI)")
 	return cmd
 }
 
@@ -188,10 +191,19 @@ func concOrDefault(c int) int {
 	return task.DefaultConcurrency()
 }
 
+// chooseReporter returns the live TUI reporter when out is an interactive
+// terminal and plain is false; otherwise the text reporter.
+func chooseReporter(out *os.File, plain bool, cancel context.CancelFunc) run.Reporter {
+	if !plain && tui.IsTerminal(out) {
+		return tui.New(out, cancel)
+	}
+	return run.NewTextReporter(out)
+}
+
 // runTasks opens the repo, runs the tasks, and prints the summary. Shared by
 // `fan run` and `fan plan --yes`. finalGate is the command to run on the
 // integration branch after merges ("" to skip it).
-func runTasks(cmd *cobra.Command, tasks []task.Task, conc int, finalGate string) error {
+func runTasks(cmd *cobra.Command, tasks []task.Task, conc int, finalGate string, plain bool) error {
 	repo, err := vcs.Open(".")
 	if err != nil {
 		return err
@@ -200,14 +212,18 @@ func runTasks(cmd *cobra.Command, tasks []task.Task, conc int, finalGate string)
 	if err := os.MkdirAll(workRoot, 0o755); err != nil {
 		return err
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	r := run.Runner{
 		Repo:      repo,
 		WorkRoot:  workRoot,
-		Reporter:  run.NewTextReporter(cmd.ErrOrStderr()),
+		Reporter:  chooseReporter(os.Stderr, plain, cancel),
 		FinalGate: finalGate,
 		Now:       timestamp,
 	}
-	outcomes, branch, fg, err := r.RunWithFinalGate(context.Background(), tasks, conc)
+	outcomes, branch, fg, err := r.RunWithFinalGate(ctx, tasks, conc)
 	if err != nil {
 		return err
 	}
